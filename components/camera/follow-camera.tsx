@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef } from "react"
 import { useFrame, useThree } from "@react-three/fiber"
 import * as THREE from "three"
-import { playerPosition } from "./player-state"
+import { playerPosition } from "../player/player-state"
 import { cameraOrbit } from "./camera-state"
 
 // Third-person camera orbiting the player. The default angle reproduces the

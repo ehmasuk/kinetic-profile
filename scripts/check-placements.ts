@@ -1,12 +1,12 @@
 // Dev tool: verifies that every rendered battlefield placement sits fully
 // inside the island outline, so no object hangs over the water ("blue" area).
 //
-// It reproduces the runtime geometry pipeline (the useModelParts bounding-box
-// math shared by AssetModel/SolidRigidBody), reads the same placement data the
-// game renders, and prints a suggested map-coordinate fix for any placement
-// whose footprint crosses the shoreline.
+// It reuses the shared baking pipeline (lib/model-parts.ts — the same math the
+// runtime instancer and collider builder use) and the same placement data the
+// game renders (ALL_PROTOS), then prints a suggested map-coordinate fix for
+// any placement whose footprint crosses the shoreline.
 //
-// Run:  node --experimental-strip-types scripts/check-placements.ts
+// Run:  node --experimental-transform-types scripts/check-placements.ts
 
 import fs from "node:fs"
 import path from "node:path"
@@ -14,23 +14,13 @@ import path from "node:path"
 import * as THREE from "three"
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js"
 
+import { centroidOf, pointInPolygon, type PolyPoint } from "../lib/geometry.ts"
+import { bakeModelParts } from "../lib/model-parts.ts"
 import {
-  CAMP_PROPS,
-  DOCK,
-  DOCK_PATH,
-  FARM_BUILDINGS,
-  FARM_PROPS,
-  FOREST_EXTRAS,
-  FOREST_PINES,
-  HOUSES,
-  KAY_GROUPS,
-  M,
-  MINE_PROPS,
-  POND_PROPS,
-  VILLAGE_PROPS,
+  ALL_PROTOS,
   type Placement,
-} from "../components/battlefield-placements"
-import { createIslandShape, MAP_SCALE } from "../components/map-config"
+} from "../components/world/battlefield-placements.ts"
+import { MAP_SCALE, createIslandShape } from "../components/world/map-config.ts"
 
 // ---------- browser shims so GLTFLoader runs offline ----------
 
@@ -57,10 +47,12 @@ globalThis.self = globalThis as unknown as Window & typeof globalThis
 // FileLoader dispatches a ProgressEvent on every chunk
 ;(globalThis as { ProgressEvent?: unknown }).ProgressEvent =
   class FakeProgressEvent {
-    constructor(
-      public type: string,
-      public init?: { loaded: number; total: number }
-    ) {}
+    type: string
+    init?: { loaded: number; total: number }
+    constructor(type: string, init?: { loaded: number; total: number }) {
+      this.type = type
+      this.init = init
+    }
   }
 // Prefer the TextureLoader path (our image stub) over ImageBitmapLoader
 ;(globalThis as { createImageBitmap?: unknown }).createImageBitmap = undefined
@@ -103,34 +95,13 @@ globalThis.fetch = (async (
 
 // ---------- island polygon ----------
 
-type PolyPoint = { x: number; z: number }
-
 const POLY: PolyPoint[] = createIslandShape(MAP_SCALE)
   .extractPoints(128)
   .shape.map((p) => ({ x: p.x, z: -p.y }))
 
-function pointInPolygon(x: number, z: number, poly: PolyPoint[]): boolean {
-  let inside = false
-  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-    const xi = poly[i].x
-    const zi = poly[i].z
-    const xj = poly[j].x
-    const zj = poly[j].z
-    if (zi > z !== zj > z && x < ((xj - xi) * (z - zi)) / (zj - zi) + xi) {
-      inside = !inside
-    }
-  }
-  return inside
-}
+const CENTROID = centroidOf(POLY)
 
-const CENTROID = POLY.reduce(
-  (acc, p) => ({ x: acc.x + p.x, z: acc.z + p.z }),
-  { x: 0, z: 0 }
-)
-CENTROID.x /= POLY.length
-CENTROID.z /= POLY.length
-
-// ---------- model footprint loading (mirrors useModelParts) ----------
+// ---------- model footprint loading (shared bake pipeline) ----------
 
 type PartBox = { cx: number; cz: number; hx: number; hz: number }
 
@@ -163,52 +134,24 @@ async function loadParts(asset: string): Promise<PartBox[]> {
       }
     )
 
-    gltf.scene.updateMatrixWorld(true)
+    // Same baking as the runtime instancer: world transforms applied, model
+    // XZ-centered on its origin and grounded at y=0.
+    const parts = bakeModelParts(gltf.scene)
 
-    // Bake world transforms, mirroring useModelParts
-    const baked: { geo: THREE.BufferGeometry }[] = []
-    gltf.scene.traverse((obj) => {
-      const mesh = obj as THREE.Mesh
-      if (!mesh.isMesh) return
-      baked.push({ geo: mesh.geometry.clone().applyMatrix4(mesh.matrixWorld) })
-    })
-    if (baked.length === 0) return []
-
-    // Recenter XZ on the model's union bbox first, exactly like the runtime
-    let minX = Infinity
-    let maxX = -Infinity
-    let minZ = Infinity
-    let maxZ = -Infinity
-    for (const { geo } of baked) {
-      geo.computeBoundingBox()
-      const b = geo.boundingBox
-      if (!b) continue
-      minX = Math.min(minX, b.min.x)
-      maxX = Math.max(maxX, b.max.x)
-      minZ = Math.min(minZ, b.min.z)
-      maxZ = Math.max(maxZ, b.max.z)
-    }
-    const centerX = (minX + maxX) / 2
-    const centerZ = (minZ + maxZ) / 2
-
-    const parts: PartBox[] = []
-    for (const { geo } of baked) {
-      geo.translate(-centerX, 0, -centerZ)
-      geo.computeBoundingBox()
-      const box = geo.boundingBox
-      if (!box) continue
-      const halfX = (box.max.x - box.min.x) / 2
-      const halfZ = (box.max.z - box.min.z) / 2
+    const boxes: PartBox[] = []
+    for (const part of parts) {
+      const halfX = part.size.x / 2
+      const halfZ = part.size.z / 2
       // Same debris threshold as the runtime collider builder
       if (halfX < 0.05 || halfZ < 0.05) continue
-      parts.push({
-        cx: (box.min.x + box.max.x) / 2,
-        cz: (box.min.z + box.max.z) / 2,
+      boxes.push({
+        cx: part.center.x,
+        cz: part.center.z,
         hx: halfX,
         hz: halfZ,
       })
     }
-    return parts
+    return boxes
   })()
 
   modelCache.set(asset, promise)
@@ -266,48 +209,22 @@ function fitsAt(parts: PartBox[], p: Placement): boolean {
   )
 }
 
-// ---------- placements to check (mirrors the Battlefield render tree) ----------
-
-type Spot = { label: string; path: string; placement: Placement }
-
-const RENDERED_SPOTS: Spot[] = [
-  { label: "HOUSES[0]", path: M.house1, placement: HOUSES[0] },
-  { label: "HOUSES[1]", path: M.house3, placement: HOUSES[1] },
-  { label: "HOUSES[2]", path: M.house2, placement: HOUSES[2] },
-  { label: "HOUSES[3]", path: M.house2, placement: HOUSES[3] },
-  ...FOREST_PINES.map((placement, i) => ({
-    label: `FOREST_PINES[${i}]`,
-    path: M.pine,
-    placement,
-  })),
-  { label: "DOCK", path: DOCK_PATH, placement: DOCK[0] },
-]
-
-const PROP_GROUPS = [
-  ...VILLAGE_PROPS,
-  ...FARM_BUILDINGS,
-  ...FARM_PROPS,
-  ...POND_PROPS,
-  ...MINE_PROPS,
-  ...CAMP_PROPS,
-  ...FOREST_EXTRAS,
-  ...KAY_GROUPS,
-]
-
-PROP_GROUPS.forEach((group) => {
-  const modelName = group.path.split("/").pop() ?? group.path
-  group.spots.forEach((placement, i) => {
-    RENDERED_SPOTS.push({
-      label: `${modelName}[${i}]`,
-      path: group.path,
-      placement,
-    })
-  })
-})
+// ---------- placements to check (the render list) ----------
 
 // Physics colliders (SolidRigidBody / SOLID_PROTOS) cover exactly the same
 // spots as the rendered groups, so a single pass validates visuals and
 // collision together.
+
+type Spot = { label: string; path: string; placement: Placement }
+
+const RENDERED_SPOTS: Spot[] = ALL_PROTOS.flatMap((group) => {
+  const modelName = group.path.split("/").pop() ?? group.path
+  return group.spots.map((placement, i) => ({
+    label: `${modelName}[${i}]`,
+    path: group.path,
+    placement,
+  }))
+})
 
 // ---------- main ----------
 
@@ -348,7 +265,11 @@ async function main(): Promise<void> {
       const uz = dz / dist
       const posAt = (r: number): Placement => ({
         ...spot.placement,
-        position: [CENTROID.x + ux * r, spot.placement.position[1], CENTROID.z + uz * r],
+        position: [
+          CENTROID.x + ux * r,
+          spot.placement.position[1],
+          CENTROID.z + uz * r,
+        ],
       })
 
       if (fitsAt(parts, posAt(0))) {
@@ -366,7 +287,8 @@ async function main(): Promise<void> {
       }
     }
 
-    let line = `${spot.label}: pos(map)=(${format(mapX)}, ${format(mapZ)}) ` +
+    let line =
+      `${spot.label}: pos(map)=(${format(mapX)}, ${format(mapZ)}) ` +
       `aabb x[${format(box.minX)}..${format(box.maxX)}] z[${format(box.minZ)}..${format(box.maxZ)}]`
     if (suggestion) {
       line += `\n  fix -> map=(${format(suggestion.x / MAP_SCALE)}, ${format(suggestion.z / MAP_SCALE)})`

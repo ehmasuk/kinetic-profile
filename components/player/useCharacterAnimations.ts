@@ -54,10 +54,7 @@ export function useCharacterAnimations(
 
       if (running !== (mode.current === "run")) {
         const next = resolveAction(actions, running ? RUN_CLIPS : IDLE_CLIPS)
-        const current = resolveAction(
-          actions,
-          running ? IDLE_CLIPS : RUN_CLIPS
-        )
+        const current = resolveAction(actions, running ? IDLE_CLIPS : RUN_CLIPS)
         if (next) {
           current?.fadeOut(ANIM_FADE)
           next.reset().fadeIn(ANIM_FADE).play()

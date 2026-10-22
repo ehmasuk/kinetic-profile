@@ -2,8 +2,8 @@
 
 import { useMemo, useRef, type RefObject } from "react"
 import type { RapierRigidBody } from "@react-three/rapier"
-import { createIslandShape, MAP_SCALE } from "../map-config"
-import { cameraOrbit } from "../camera-state"
+import { createIslandShape, MAP_SCALE } from "../world/map-config"
+import { cameraOrbit } from "../camera/camera-state"
 import {
   BOUNDARY_BINS,
   BOUNDARY_MARGIN,
@@ -48,7 +48,10 @@ function buildIslandBounds(): IslandBounds {
   for (const p of points) {
     const dx = p.x - cx
     const dz = -p.y - cz
-    radii[binIndex(dx, dz)] = Math.max(radii[binIndex(dx, dz)], Math.hypot(dx, dz))
+    radii[binIndex(dx, dz)] = Math.max(
+      radii[binIndex(dx, dz)],
+      Math.hypot(dx, dz)
+    )
   }
 
   // Fill empty bins from the nearest occupied neighbor so sampling gaps in the

@@ -26,10 +26,10 @@ import {
   SPAWN_RING_INNER,
   SPAWN_RING_OUTER,
   SPAWN_RING_Y,
-} from "./player/player-config"
-import { usePlayerControls } from "./player/usePlayerControls"
-import { usePlayerMovement } from "./player/usePlayerMovement"
-import { useCharacterAnimations } from "./player/useCharacterAnimations"
+} from "./player-config"
+import { usePlayerControls } from "./usePlayerControls"
+import { usePlayerMovement } from "./usePlayerMovement"
+import { useCharacterAnimations } from "./useCharacterAnimations"
 
 type CharacterSpawnProps = {
   position?: [number, number, number]
@@ -93,14 +93,14 @@ export function CharacterSpawn({ position = [0, 0, 0] }: CharacterSpawnProps) {
 
   return (
     <RigidBody
-        ref={body}
-        type="dynamic"
-        colliders={false}
-        position={[position[0], SPAWN_BODY_Y, position[2]]}
-        enabledRotations={[false, false, false]}
-        canSleep={false}
-        ccd
-      >
+      ref={body}
+      type="dynamic"
+      colliders={false}
+      position={[position[0], SPAWN_BODY_Y, position[2]]}
+      enabledRotations={[false, false, false]}
+      canSleep={false}
+      ccd
+    >
       <CapsuleCollider
         args={[CAPSULE_HALF_HEIGHT, CAPSULE_RADIUS]}
         position={[0, CAPSULE_HALF_HEIGHT + CAPSULE_RADIUS, 0]}
@@ -116,7 +116,10 @@ export function CharacterSpawn({ position = [0, 0, 0] }: CharacterSpawnProps) {
         </group>
 
         {/* Ground contact shadow */}
-        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, CONTACT_SHADOW_Y, 0]}>
+        <mesh
+          rotation={[-Math.PI / 2, 0, 0]}
+          position={[0, CONTACT_SHADOW_Y, 0]}
+        >
           <circleGeometry args={[CONTACT_SHADOW_RADIUS, 24]} />
           <meshBasicMaterial color="#2c4630" transparent opacity={0.22} />
         </mesh>

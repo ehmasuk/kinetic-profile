@@ -5,7 +5,13 @@ export const CHARACTER_PATH = "/models/characters/man.glb"
 
 // Actual clip names found in the GLB (verified via GLTFLoader inspection).
 export const IDLE_CLIPS = ["CharacterArmature|Idle", "Idle", "idle"]
-export const RUN_CLIPS = ["CharacterArmature|Run", "Run", "run", "Walk", "Walking"]
+export const RUN_CLIPS = [
+  "CharacterArmature|Run",
+  "Run",
+  "run",
+  "Walk",
+  "Walking",
+]
 
 // Seconds for the idle/run crossfade.
 export const ANIM_FADE = 0.25

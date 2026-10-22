@@ -3,8 +3,17 @@
 // `on()` / `fillLine`. Pure data and helpers, imported by the scene renderer
 // and by scripts/check-placements.ts so bounds validation always tests the
 // same numbers the game renders.
+// NOTE: relative imports use explicit `.ts` extensions because the checker
+// script loads this module under Node's type-stripping loader (which, unlike
+// the bundler, does not resolve extensionless imports).
 
-import { MAP_SCALE, createIslandShape } from "./map-config"
+import {
+  mulberry32,
+  pointInPolygon,
+  distToSegment as distToSeg,
+  type PolyPoint,
+} from "../../lib/geometry.ts"
+import { MAP_SCALE, createIslandShape } from "./map-config.ts"
 
 export type Vec2 = [number, number]
 
@@ -152,15 +161,8 @@ export const M = {
 
 export const WELL: Vec2 = [-2.7, -0.4]
 
-export const WELL_STREET: Vec2 = [1.6, -1.9]
 export const FARM_GATE: Vec2 = [8.0, -4.3]
 
-export const WELL_WEST: Vec2 = [-1.6, 1.9]
-
-export const WELL_NORTH: Vec2 = [-1.6, -1.9]
-export const POND_LANE: Vec2 = [-12.2, -8.0]
-
-export const WELL_EAST: Vec2 = [1.6, 1.9]
 export const CAMP_GATE: Vec2 = [7.8, 4.6]
 export const CAMP_ROAD: Vec2 = [10.4, 7.6]
 export const CAMP_END: Vec2 = [10.6, 11.8]
@@ -233,17 +235,7 @@ export const ROAD_SEGMENTS: [Vec2, Vec2][] = [
 
 export const GOLD_SPOT: Vec2 = [-14.6, 9.4]
 
-export const WALL_SPAN = 1.94
-
-export const WALLS: Placement[] = [
-  ...fillLine([-21.35, -21.35], [21.35, -21.35], WALL_SPAN, 4.6),
-  ...fillLine([-21.35, 21.35], [-1.23, 21.35], WALL_SPAN, 4.6),
-  ...fillLine([1.75, 21.35], [21.35, 21.35], WALL_SPAN, 4.6),
-  ...fillLine([21.35, -21.35], [21.35, 21.35], WALL_SPAN, 4.6),
-  ...fillLine([-21.35, 21.35], [-21.35, -21.35], WALL_SPAN, 4.6),
-]
-
-export const WALL_DOOR: Placement[] = [on([0.26, 21.35], 0, 0, 4.6)]
+export const WALL_DOOR: Placement = on([0.26, 21.35], 0, 0, 4.6)
 
 export const HOUSES: Placement[] = [
   on([-6.6, -2.6], 0, face([-6.6, -2.6], WELL), 4.6),
@@ -276,9 +268,7 @@ export const VILLAGE_PROPS: PropGroupDef[] = [
   passable(M.crate, [on([8.5, -0.6], 0, 0.7, 4)]),
   passable(M.box, [on([7.6, 2.6], 0, 0.1, 3.6)]),
   passable(M.logs, [on([2.4, 8.4], 0, -0.5, 3.4)]),
-  solid(M.watchTower1, [
-    on([-2.2, 8.2], 0, face([-2.2, 8.2], [1, -8.2]), 4.4),
-  ]),
+  solid(M.watchTower1, [on([-2.2, 8.2], 0, face([-2.2, 8.2], [1, -8.2]), 4.4)]),
 ]
 
 export const FARM_BUILDINGS: PropGroupDef[] = [
@@ -416,17 +406,10 @@ export const DOCK_PATH = "/models/environment/Dock_FirstAge.gltf"
 // whole map with a seeded generator that keeps clear of every existing prop,
 // the roads, the pond, and the shoreline. Numbers below are world units.
 
-const rnd = (() => {
-  let s = 1337
-  return () => {
-    s = (s * 1664525 + 1013904223) >>> 0
-    return s / 4294967296
-  }
-})()
+const rnd = mulberry32(1337)
 
-type OutlinePoint = { x: number; z: number }
-
-const ISLAND_OUTLINE: OutlinePoint[] = createIslandShape(MAP_SCALE)
+// Island outline in world units (shape y maps to world -z).
+const ISLAND_OUTLINE: PolyPoint[] = createIslandShape(MAP_SCALE)
   .extractPoints(192)
   .shape.map((p) => ({ x: p.x, z: -p.y }))
 
@@ -437,34 +420,10 @@ const islandCenter = ISLAND_OUTLINE.reduce(
 islandCenter.x /= ISLAND_OUTLINE.length
 islandCenter.z /= ISLAND_OUTLINE.length
 
-const distToSeg = (
-  px: number,
-  pz: number,
-  ax: number,
-  az: number,
-  bx: number,
-  bz: number
-): number => {
-  const dx = bx - ax
-  const dz = bz - az
-  const len = dx * dx + dz * dz
-  if (len === 0) return Math.hypot(px - ax, pz - az)
-  const t = Math.max(0, Math.min(1, ((px - ax) * dx + (pz - az) * dz) / len))
-  return Math.hypot(px - (ax + dx * t), pz - (az + dz * t))
-}
+const insideIsland = (x: number, z: number): boolean =>
+  pointInPolygon(x, z, ISLAND_OUTLINE)
 
-function insideIsland(x: number, z: number): boolean {
-  let inside = false
-  for (let i = 0, j = ISLAND_OUTLINE.length - 1; i < ISLAND_OUTLINE.length; j = i++) {
-    const yi = ISLAND_OUTLINE[i].z
-    const yj = ISLAND_OUTLINE[j].z
-    if (yi > z !== yj > z && x < ((ISLAND_OUTLINE[j].x - ISLAND_OUTLINE[i].x) * (z - yi)) / (yj - yi) + ISLAND_OUTLINE[i].x) {
-      inside = !inside
-    }
-  }
-  return inside
-}
-
+// Distance from a point to the island outline (shoreline).
 const shoreDistance = (x: number, z: number): number => {
   let min = Infinity
   for (let i = 0; i < ISLAND_OUTLINE.length; i++) {
@@ -481,11 +440,23 @@ const wallDistance = (x: number, z: number): number => {
   const c = WALL_R
   let min = Infinity
   for (const [a, b] of [
-    [{ x: -c, z: -c }, { x: c, z: -c }],
-    [{ x: c, z: -c }, { x: c, z: c }],
-    [{ x: c, z: c }, { x: -c, z: c }],
-    [{ x: -c, z: c }, { x: -c, z: -c }],
-  ] as [OutlinePoint, OutlinePoint][]) {
+    [
+      { x: -c, z: -c },
+      { x: c, z: -c },
+    ],
+    [
+      { x: c, z: -c },
+      { x: c, z: c },
+    ],
+    [
+      { x: c, z: c },
+      { x: -c, z: c },
+    ],
+    [
+      { x: -c, z: c },
+      { x: -c, z: -c },
+    ],
+  ] as [PolyPoint, PolyPoint][]) {
     min = Math.min(min, distToSeg(x, z, a.x, a.z, b.x, b.z))
   }
   return min
@@ -496,7 +467,14 @@ const roadDistance = (x: number, z: number): number => {
   for (const [a, b] of ROAD_SEGMENTS) {
     min = Math.min(
       min,
-      distToSeg(x, z, a[0] * MAP_SCALE, a[1] * MAP_SCALE, b[0] * MAP_SCALE, b[1] * MAP_SCALE)
+      distToSeg(
+        x,
+        z,
+        a[0] * MAP_SCALE,
+        a[1] * MAP_SCALE,
+        b[0] * MAP_SCALE,
+        b[1] * MAP_SCALE
+      )
     )
   }
   return min
@@ -563,7 +541,7 @@ const KAY_GUARDS: Guard[] = (() => {
   for (const spot of HOUSES) push(spot, M.house1)
   for (const spot of FOREST_PINES) push(spot, M.pine)
   for (const spot of DOCK) push(spot, DOCK_PATH)
-  for (const spot of WALL_DOOR) push(spot, "")
+  push(WALL_DOOR, "")
   out.push({ x: POND[0] * MAP_SCALE, z: POND[1] * MAP_SCALE, r: 10.4 })
   return out
 })()
@@ -573,8 +551,7 @@ const POND_CENTER = { x: POND[0] * MAP_SCALE, z: POND[1] * MAP_SCALE }
 const pondDistance = (x: number, z: number): number =>
   Math.hypot(x - POND_CENTER.x, z - POND_CENTER.z)
 
-const inDoorBand = (x: number, z: number): boolean =>
-  Math.abs(x) < 7 && z > 57
+const inDoorBand = (x: number, z: number): boolean => Math.abs(x) < 7 && z > 57
 
 function suitsSpot(
   x: number,
@@ -850,7 +827,8 @@ export const KAY_GROUPS: PropGroupDef[] = [
 ]
 
 // Every prop group on the battlefield, with its declared solidity. The scene
-// renders ALL_PROTOS and only solid groups receive physics colliders.
+// renders RENDER_GROUPS (merged by path into one instanced draw call each)
+// and only solid groups receive physics colliders.
 export const ALL_PROTOS: PropGroupDef[] = [
   ...VILLAGE_PROPS,
   ...FARM_BUILDINGS,
@@ -870,3 +848,15 @@ export const ALL_PROTOS: PropGroupDef[] = [
 export const SOLID_PROTOS: PropGroupDef[] = ALL_PROTOS.filter(
   (group) => group.solid !== false
 )
+
+// Render groups: ALL_PROTOS merged by model path so each asset renders as a
+// single instanced mesh set, regardless of how many logical groups use it.
+export const RENDER_GROUPS: { path: string; spots: Placement[] }[] = (() => {
+  const map = new Map<string, Placement[]>()
+  for (const group of ALL_PROTOS) {
+    const list = map.get(group.path) ?? []
+    list.push(...group.spots)
+    map.set(group.path, list)
+  }
+  return Array.from(map, ([path, spots]) => ({ path, spots }))
+})()
