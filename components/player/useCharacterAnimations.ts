@@ -3,13 +3,7 @@
 import { useCallback, useEffect, useRef, type RefObject } from "react"
 import { useAnimations } from "@react-three/drei"
 import * as THREE from "three"
-import {
-  ANIM_FADE,
-  IDLE_CLIPS,
-  RUN_CLIPS,
-  SHOOT_CLIPS,
-} from "./player-config"
-import { shootRequests } from "../player-state"
+import { ANIM_FADE, IDLE_CLIPS, RUN_CLIPS } from "./player-config"
 
 // Picks the first candidate clip that actually exists in the GLB, falling back
 // to the first available action so a re-exported model never breaks loading.
@@ -34,14 +28,13 @@ type CharacterAnimationControl = {
   update: (delta: number, running: boolean) => void
 }
 
-// Idle/running/shooting animation handling for the player model.
+// Idle/running animation handling for the player model.
 export function useCharacterAnimations(
   clips: THREE.AnimationClip[],
   target: RefObject<THREE.Object3D | null>
 ): CharacterAnimationControl {
   const { actions, mixer } = useAnimations(clips, target)
-  const mode = useRef<"idle" | "run" | "shoot">("idle")
-  const lastShootRequest = useRef(0)
+  const mode = useRef<"idle" | "run">("idle")
 
   useEffect(() => {
     if (process.env.NODE_ENV !== "production") {
@@ -50,14 +43,7 @@ export function useCharacterAnimations(
     const idle = resolveAction(actions, IDLE_CLIPS)
     idle?.reset().play()
     mode.current = "idle"
-
-    // When the one-shot shooting clip ends, return to the ambient mode.
-    const onFinished = () => {
-      mode.current = "idle"
-    }
-    mixer.addEventListener("finished", onFinished)
     return () => {
-      mixer.removeEventListener("finished", onFinished)
       mixer.stopAllAction()
     }
   }, [actions, mixer])
@@ -65,26 +51,6 @@ export function useCharacterAnimations(
   const update = useCallback(
     (delta: number, running: boolean) => {
       mixer.update(delta)
-
-      if (shootRequests.count !== lastShootRequest.current) {
-        lastShootRequest.current = shootRequests.count
-        const next = resolveAction(actions, SHOOT_CLIPS)
-        if (next) {
-          const current = resolveAction(
-            actions,
-            mode.current === "run" ? RUN_CLIPS : IDLE_CLIPS
-          )
-          current?.fadeOut(ANIM_FADE)
-          next.reset()
-          next.setLoop(THREE.LoopOnce, 1)
-          next.clampWhenFinished = true
-          next.timeScale = 1.7 // keep the one-shot snappy and repeatable
-          next.fadeIn(ANIM_FADE / 2).play()
-          mode.current = "shoot"
-        }
-      }
-
-      if (mode.current === "shoot") return
 
       if (running !== (mode.current === "run")) {
         const next = resolveAction(actions, running ? RUN_CLIPS : IDLE_CLIPS)

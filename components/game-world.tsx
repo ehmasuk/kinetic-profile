@@ -8,7 +8,6 @@ import * as THREE from "three"
 import { CharacterSpawn } from "./CharacterSpawn"
 import { FollowCamera } from "./follow-camera"
 import { LoadingScreen } from "./loading-screen"
-import { Crosshair } from "./crosshair"
 import { MAP_SCALE, createIslandShape } from "./map-config"
 import {
   CAMP_END,
@@ -835,8 +834,6 @@ export default function GameWorld() {
         Move: <span className="font-semibold">WASD</span> /{" "}
         <span className="font-semibold">Arrow Keys</span>
       </div>
-
-      <Crosshair />
 
       <LoadingScreen />
 
